@@ -92,13 +92,13 @@ class RadioMaster(AWSMQTTPubSub):
             self.mesh.DHCP()
 
 
-        while self.network.available():
-            header, payload = self.network.read(struct.calcsize)
-            self.__to_nodes(header, payload)
+            while self.network.available():
+                header, payload = self.network.read(struct.calcsize(calcsize_value))
+                self.__to_nodes(header, payload)
 
 
     def __to_nodes(self, header, payload):
-        node = self.__check_nodes(header.id)
+        node = self.__check_nodes(self.mesh.getNodeID(header.from_node))
         node.dispatch_msg(header, payload)
 
     def __check_nodes(self, id):
@@ -121,8 +121,9 @@ class RFNode(AWSMQTTPubSub):
         self.mesh = mesh
         self.logger = logger
 
-        AWSMQTTPubSub(self.thingname, self.logger)
-
+        AWSMQTTPubSub.__init__(self,self.thingname, self.logger)
+        self.MQTT_thing_connect()
+        self.MQTT_start()
         #Create dictionary header for this nodes
         #To assigne each type message with their
         #corresponding topic to MQTT
@@ -148,7 +149,9 @@ class RFNode(AWSMQTTPubSub):
             self.__comand_msg(header, payload)
         else:
         #IS A SENSOR MESSAGE
-            print(payload[0], payload[1])
+            value = payload[0] + (payload[1]<<8)/100
+            self.logger.info("Payload {}".format(value))
+            self.MQTT_CLIENT.publish(topic,str(value),0)
         
     def __comand_msg(self, header, payload):
         if chr(header.type) in COMMAND_TYPE_HEADERS:

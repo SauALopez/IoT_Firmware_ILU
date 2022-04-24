@@ -17,15 +17,18 @@ if not mesh.begin():
     # if mesh.begin() returns false for a master node,
     # then radio.begin() returned false.
     raise OSError("Radio hardware not responding.")
-radio.setPALevel(RF24_PA_MIN)  # Power Amplifier
+radio.setPALevel(RF24_PA_MAX)  # Power Amplifier
 radio.printDetails()
-
+nodes = [0,1]
+address = [0,1]
 try:
+    
     while True:
         mesh.update()
         mesh.DHCP()
-
+        
         while network.available():
+            print(mesh.getAddress(50))
             calcsize_text = "llllllll"
             
             header, payload = network.read(struct.calcsize(calcsize_text)) #default to 'L'
@@ -44,7 +47,7 @@ try:
                 print(payload[0], payload[1])
             else:
                 print("Paquete diferente")
-            
+  
 
 except KeyboardInterrupt:
     f.close()
