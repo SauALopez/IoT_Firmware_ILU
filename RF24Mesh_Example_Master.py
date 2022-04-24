@@ -19,7 +19,7 @@ if not mesh.begin():
     raise OSError("Radio hardware not responding.")
 radio.setPALevel(RF24_PA_MIN)  # Power Amplifier
 radio.printDetails()
-f = open('data.txt','w')
+
 try:
     while True:
         mesh.update()
