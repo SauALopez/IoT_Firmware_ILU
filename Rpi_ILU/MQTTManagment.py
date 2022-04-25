@@ -57,7 +57,7 @@ class AWSMQTTPubSub():
         self.logger.info("{} se ha subscrito".format(self.thingname))
 
     def __on_unsubscribe(self, client, userdata, mid):
-        self.logger.info("{} se ha un-subscrito".format(self.thingname))
+        self.logger.info("{} se ha un-subscrito {}".format(self.thingname, userdata))
 
 
     def MQTT_connect(self):

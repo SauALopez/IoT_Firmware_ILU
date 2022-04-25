@@ -8,6 +8,7 @@ from MQTTManagment import AWSMQTTPubSub
 import logging
 import sys
 from datetime import datetime
+import json
 # This type headers indicates  
 # the type sensor to asignate the value 
 # that has the payload
@@ -28,15 +29,21 @@ SENSOR_TYPE_HEADERS = { 'G' : 'nodos/{}/sensores/humedad_suelo',
 # Or any kind of implemetnation for GPIO control en nodes.
 # This header dont publish  anything to MQTT.
 # Are just used to communicate bethew Master and Nodes
-COMMAND_TYPE_HEADERS = ['A', 'B', 'C', 'D', 'E']
+COMMAND_TYPE_HEADERS = ['A',    #Master send to node too activate/deactivate bomb/accionador. 
+                                #Base on the limits establish betwen master and control 
+                                #MASTER NEEDS TO HANDLE, THIS MESSAGE
+                        'B',    #Master Listen to notification from node that are missing packets from humedad de suelo
+                        'C',    #Master Listen to notification from node that are missing packets from humedad 
+                        'D',    #Master Listen to notification from node that are missing packets from luz
+                        'E']    #Master Listen to notification from node that are missing packets from temperatura
 
 
 # This type of headers, can be used for future 
 # Usage, like calibrations, some kind of update
 # Or any implematation added to the sensors devices.
 # This headers are to subscribe by the nodes.
-CONF_TYPE_HEADERS = {   'V' : 'nodos/{}/configuracion/velocidad/humedad_suelo',  ##
-                        'W' : 'nodos/{}/configuracion/velocidad/humedad',
+CONF_TYPE_HEADERS = {   'V' : 'nodos/{}/configuracion/velocidad/luz',  ##
+                        'W' : 'nodos/{}/configuracion/velocidad/suelo',
                         'X' : 'nodos/{}/configuracion/velocidad/humedad', 
                         'Y' : 'nodos/{}/configuracion/velocidad/temperatura',
                         'Z' : 'nodos/{}/configuracion/resolucion'}
@@ -111,15 +118,17 @@ class RadioMaster(AWSMQTTPubSub):
             #node dont exist, create node
             self.nodes[id] = RFNode(id, self.mesh, self.logger)
             return self.nodes[id]
-
+    
 
 class RFNode(AWSMQTTPubSub):
     
     def __init__(self, id, mesh, logger):
-
+        self.nodeid = int(id)
         self.thingname = "Ardu_{}_ILU".format(id)    
         self.mesh = mesh
         self.logger = logger
+
+        self.resolucion = 2 #por defecto
 
         AWSMQTTPubSub.__init__(self,self.thingname, self.logger)
         self.MQTT_thing_connect()
@@ -129,6 +138,19 @@ class RFNode(AWSMQTTPubSub):
         #corresponding topic to MQTT
         self.__header_dictionary()
 
+    def _AWSMQTTPubSub__on_message(self, client, userdata, message):
+        # Implementation, to send de configurations send from web controler
+        # too the respective node
+        msg_type = self.topic_dict[message.topic]
+        msg_payload = int(message.payload.decode('utf-8'))
+        if msg_type == 'Z':
+            self.resolucion = msg_payload
+        self.logger.info("Tipo: {} Mensaje: {}".format(msg_type,msg_payload))
+        #super().__on_message(client, userdata, message)
+        self.logger.info("Passing message to Node from MQTT topic")
+        data = struct.pack("l", msg_payload)
+        self.mesh.write(data, ord(msg_type), self.nodeid)
+    
     def __header_dictionary(self):
         self.sensors_topics = {}
         for msg_type in SENSOR_TYPE_HEADERS:
@@ -137,11 +159,13 @@ class RFNode(AWSMQTTPubSub):
     def MQTT_thing_connect(self):
         #Call MQTT_connect from AWSMQTT class
         self.MQTT_connect()
+        self.topic_dict = {}
         #SUBSCRIBE TO CONF HEADER/TOPICS
         for topic_type in CONF_TYPE_HEADERS:
             topic = CONF_TYPE_HEADERS[topic_type].format(self.thingname)
             self.MQTT_CLIENT.subscribe(topic, 0)
-
+            self.topic_dict[topic] = topic_type
+            self.logger.info("Subscrito: {}".format(topic))
     def dispatch_msg(self, header, payload):
         topic = self.sensors_topics.get(chr(header.type), None)
         #NOT A SENSOR MESSAGE
@@ -149,9 +173,14 @@ class RFNode(AWSMQTTPubSub):
             self.__comand_msg(header, payload)
         else:
         #IS A SENSOR MESSAGE
-            value = payload[0] + (payload[1]<<8)/100
-            self.logger.info("Payload {}".format(value))
-            self.MQTT_CLIENT.publish(topic,str(value),0)
+            value = round((payload[0] + (payload[1]<<8))/(pow(10,self.resolucion)),self.resolucion)
+            msg = { "time": datetime.now().isoformat(timespec='seconds'),
+                    "value": value,
+                    "name": self.thingname,
+                    "resolution": self.resolucion }
+            msg_out = json.dumps(msg)
+            self.logger.info("Message recived: {}, to topic:{}".format(value,topic))
+            self.MQTT_CLIENT.publish(topic,msg_out,0)
         
     def __comand_msg(self, header, payload):
         if chr(header.type) in COMMAND_TYPE_HEADERS:
@@ -160,3 +189,6 @@ class RFNode(AWSMQTTPubSub):
             pass
         else:
             self.logger.info("Mensaje no manejado, no es de ningun tipo")
+
+    
+        
