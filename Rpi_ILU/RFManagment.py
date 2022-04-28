@@ -130,23 +130,38 @@ class RadioMaster(AWSMQTTPubSub):
     
     def __nodes_alive(self):
         for node in self.nodes:
+            node = self.nodes[node]
             dif = datetime.now() - node.alive
             if dif.seconds > max(node.time_stamps.values()):
                 #Node is offline, temporaly or permament
                 #send notification to web
-                node.alive_status = False
-                payload = json.dumps({
-                    "name": node.thingname,
-                    "status": node.alive_status,
-                    "msg_type" : "alive-notification",
-                    "values" : {"humedad_suelo":False,
-                                "humedad":False,
-                                "luz":False,
-                                "temperatura":False}
-                })
-                node.MQTTClient.publish(node.notification_topic, payload, 0)
+                if node.alive_status:           #Just sends onces
+                    self.logger.warning("{} esta offline, envio de notificacion a web".format(node.thingname))
+                    node.alive_status = False
+                    payload = json.dumps({
+                        "name": node.thingname,
+                        "status": node.alive_status,
+                        "msg_type" : "alive-notification",
+                        "control_flags" : {"humedad_suelo":True,
+                                    "humedad":True,
+                                    "luz":True,
+                                    "temperatura":True}
+                    })
+                    node.MQTT_CLIENT.publish(node.notification_topic, payload, 0)
+                    
+
             else:
-                node.alive_status= True
+                #node online
+                if not node.alive_status:   #back online, previous status offline. Sends just once
+                    node.alive_status= True
+                    self.logger.warning("{} esta online, envio de notificacion a web".format(node.thingname))
+                    payload = json.dumps({
+                        "name": node.thingname,
+                        "status": node.alive_status,
+                        "msg_type" : "alive-notification",
+                        "control_flags" : node.control_flag
+                    })
+                    node.MQTT_CLIENT.publish(node.notification_topic, payload, 0)
 
 class RFNode(AWSMQTTPubSub):
     
@@ -322,7 +337,7 @@ class RFNode(AWSMQTTPubSub):
                     "name" : self.thingname,
                     "status" : True,
                     "msg_type" : "notification",
-                    "values" : self.control_flag
+                    "control_flags" : self.control_flag
                 })
                 self.MQTT_CLIENT.publish(self.notification_topic, msg_payload, 0)  
             #Si es el sensor de humedad, desactivar el actuador
@@ -345,7 +360,7 @@ class RFNode(AWSMQTTPubSub):
                     "name" : self.thingname,
                     "status": True,
                     "msg_type" : "notification",
-                    "values" : self.control_flag
+                    "control_flags" : self.control_flag
                 })
                 self.MQTT_CLIENT.publish(self.notification_topic, msg_payload, 0) 
             #Si es el sensor de humedad, activar el actuador
