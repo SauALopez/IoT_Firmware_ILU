@@ -106,7 +106,8 @@ class RadioMaster(AWSMQTTPubSub):
             self.mesh.update()
             self.mesh.DHCP()
 
-
+            #Check alive nodes
+            self.__nodes_alive()
             while self.network.available():
                 header, payload = self.network.read(struct.calcsize(calcsize_value))
                 self.__to_nodes(header, payload)
@@ -127,6 +128,25 @@ class RadioMaster(AWSMQTTPubSub):
             self.nodes[id] = RFNode(id, self.mesh, self.logger)
             return self.nodes[id]
     
+    def __nodes_alive(self):
+        for node in self.nodes:
+            dif = datetime.now() - node.alive
+            if dif.seconds > max(node.time_stamps.values()):
+                #Node is offline, temporaly or permament
+                #send notification to web
+                node.alive_status = False
+                payload = json.dumps({
+                    "name": node.thingname,
+                    "status": node.alive_status,
+                    "msg_type" : "alive-notification",
+                    "values" : {"humedad_suelo":False,
+                                "humedad":False,
+                                "luz":False,
+                                "temperatura":False}
+                })
+                node.MQTTClient.publish(node.notification_topic, payload, 0)
+            else:
+                node.alive_status= True
 
 class RFNode(AWSMQTTPubSub):
     
@@ -151,7 +171,9 @@ class RFNode(AWSMQTTPubSub):
         self.control_topic = CONTROL_TOPIC.format(self.thingname)
         self.sync_topic = SYNC_TOPIC.format(self.thingname)
         self.notification_topic = "nodo/{}/notificaciones".format(self.thingname)
-
+        #For notifications and alive
+        self.alive = datetime.now()
+        self.alive_status = True
         AWSMQTTPubSub.__init__(self,self.thingname, self.logger)
         self.MQTT_thing_connect()
         self.MQTT_start()
@@ -193,6 +215,7 @@ class RFNode(AWSMQTTPubSub):
                 elif payload['who'] == 'www':
                     msg = {
                         "who" : self.thingname,
+                        "status" : self.alive_status,
                         "resolution" : self.resolucion,
                         "velocity" : self.time_stamps,
                         'limits' : self.sensors_limits,
@@ -224,6 +247,7 @@ class RFNode(AWSMQTTPubSub):
         self.MQTT_CLIENT.subscribe(self.sync_topic, 0)
 
     def dispatch_msg(self, header, payload):
+        self.alive = datetime.now()
         topic = self.sensors_topics.get(chr(header.type), None)
         #NOT A SENSOR MESSAGE
         if topic is None:
@@ -247,7 +271,7 @@ class RFNode(AWSMQTTPubSub):
     def __conf_msg(self, header, payload):
         if chr(header.type) in COMMAND_TYPE_HEADERS:
             ##Work the comand
-            self.alive = datetime.now()
+            
             pass
         else:
             self.logger.info("Mensaje no manejado, no es de ningun tipo")
@@ -296,35 +320,41 @@ class RFNode(AWSMQTTPubSub):
                 #We havent send notification on change to control
                 msg_payload = json.dumps({
                     "name" : self.thingname,
+                    "status" : True,
                     "msg_type" : "notification",
                     "values" : self.control_flag
                 })
                 self.MQTT_CLIENT.publish(self.notification_topic, msg_payload, 0)  
-                #Si es el sensor de humedad, desactivar el actuador
-                if sensor_type == 'humedad_suelo':
-                    data = struct.pack("l", 1)
-                    self.mesh.write(data, ord('F'), self.nodeid)
-                    self.sc_flag = True
+            #Si es el sensor de humedad, desactivar el actuador
+            #Manda constantemente el mesaje, cada ves que que recibe un valor
+            #de este sensor
+            if sensor_type == 'humedad_suelo':
+                data = struct.pack("l", 1)
+                self.mesh.write(data, ord('F'), self.nodeid)
+                self.sc_flag = True
 
             
         else:
             control = True   
-            #send notification to web and device if need
+            #send notification to web if need
             if not self.control_flag[sensor_type] == control:
                 self.logger.info("Enviando notificacion de limites malos para el sensor {} del {}".format(sensor_type, self.thingname))
                 self.control_flag[sensor_type] = control    #change control flag
                 #We havent send notification on change to control
                 msg_payload = json.dumps({
                     "name" : self.thingname,
+                    "status": True,
                     "msg_type" : "notification",
                     "values" : self.control_flag
                 })
                 self.MQTT_CLIENT.publish(self.notification_topic, msg_payload, 0) 
-                #Si es el sensor de humedad, activar el actuador
-                if sensor_type == 'humedad_suelo':
-                    data = struct.pack("l", 1)
-                    self.mesh.write(data, ord('A'), self.nodeid)
-                    self.sc_flag = True
+            #Si es el sensor de humedad, activar el actuador
+            #Manda constantemente el mesaje, cada ves que que recibe un valor
+            #de este sensor
+            if sensor_type == 'humedad_suelo':
+                data = struct.pack("l", 1)
+                self.mesh.write(data, ord('A'), self.nodeid)
+                self.sc_flag = True
             
         return None
 
