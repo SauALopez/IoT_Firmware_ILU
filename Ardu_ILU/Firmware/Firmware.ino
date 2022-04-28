@@ -19,6 +19,7 @@ Adafruit_AHT10 aht;
 /*Pin definitions for analog sensors */
 #define LightSensorPin A1
 #define GroudHumiditySensorPin A0
+#define ACTUATOR 10
 
 /*  Buffers para guardar informacion de sensores
     cuando estos no logran enviar la informacion
@@ -56,7 +57,6 @@ uint8_t t_temperaturelimit = 30;
   Decimal variable that indicates de number of decimal places
 */
 uint8_t decimal = 2;
-bool actuador = false;
 /*
 void lightsensor(void);
 void groundsensor(void);
@@ -67,7 +67,8 @@ void received_command(void);
 */
 void setup()
 {
-  pinMode(LED_BUILTIN,OUTPUT);
+  pinMode(ACTUATOR,OUTPUT);
+  digitalWrite(ACTUATOR, LOW);
 
   Serial.begin(115200);
   while (!Serial)
@@ -214,10 +215,18 @@ void received_command(void)
       break;
     case 'Y':
       t_temperaturelimit = payload;
+      break;
     case 'Z':
-      decimal = int(payload);
+      decimal = payload;
+      break;;
     case 'A':
-      actuador = true;
+      Serial.println("[INFO] ACTIVANDO ACTUADOR");
+      digitalWrite(ACTUATOR, HIGH);
+      break;
+    case 'F':
+      Serial.println("[INFO] DESACTIVANDO ACTUADOR");
+      digitalWrite(ACTUATOR, LOW);
+      break;
     default:
       break;
     }
@@ -241,7 +250,10 @@ void groundsensor()
   //Make sensor calculations
   Serial.println("[INFO] TIMER - GROUND");
   uint16_t analogico = analogRead(GroudHumiditySensorPin);
+  Serial.println(analogico);
   float hr =  (0.0001468 * pow(analogico,2)) - (0.2508 * analogico) + (105.3);
+  Serial.println(hr);
+  if (hr < 0){hr = 0;}
   hr = hr * pow(10,decimal);
   uint16_t value = (uint16_t) hr;
   groundbuff.push(value);
@@ -280,15 +292,6 @@ void loop()
   mesh.update(); // check for updated address
   received_command(); //check is there ir a msg and procces it
   
-  if(actuador)
-  {
-    digitalWrite(LED_BUILTIN, HIGH);
-  }
-  else
-  {
-    digitalWrite(LED_BUILTIN, LOW);
-  }
-
   /*
     SoftTimer for Light sensor
   */
